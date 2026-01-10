@@ -8,6 +8,9 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#000000">
     <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -386,14 +389,14 @@
         <div>
             <label for="imgLoader" class="btn">📂 Add Images</label>
             <input type="file" id="imgLoader" multiple accept="image/*">
-            <button class="btn" onclick="downloadData()">💾 Download JSON</button>
-            <label for="fileLoader" class="btn">📥 Load JSON</label>
-            <input type="file" id="fileLoader" accept=".json,application/json">
+            <button class="btn" onclick="saveProject()">💾 Save Project (.rdct)</button>
+            <label for="fileLoader" class="btn">📥 Load Project (.rdct)</label>
+            <input type="file" id="fileLoader" accept=".rdct,.zip,application/zip">
             <button class="btn" onclick="resetAll()">🗑️ Reset All</button>
         </div>
         <div id="gallery-list"></div>
         <button class="btn" id="btn-settings" onclick="toggleSettings()">⚙️ Settings</button>
-        <div id="version-tag">v0.0.2</div>
+        <div id="version-tag">v0.0.4</div>
     </div>
 
     <div id="main">
@@ -913,18 +916,14 @@
                             if (activeTool === 'text') {
                                 activateTextInput(i);
                             } else {
-                                if(confirm("Delete text?")) {
-                                    pushHistory();
-                                    bars.splice(i, 1);
-                                    saveImageToDB(appData.images[appData.idx]);
-                                }
-                            }
-                        } else {
-                            if(confirm("Delete box?")) {
                                 pushHistory();
                                 bars.splice(i, 1);
                                 saveImageToDB(appData.images[appData.idx]);
                             }
+                        } else {
+                            pushHistory();
+                            bars.splice(i, 1);
+                            saveImageToDB(appData.images[appData.idx]);
                         }
                     }
                     if(e.cancelable) e.preventDefault();
@@ -1013,35 +1012,111 @@
         function applyZoom(s) { currentScale=s; updateTransform(); document.getElementById('zoom-disp').innerText = Math.round(s*100)+'%'; }
         function renameImage(e, i) { e.stopPropagation(); const n=prompt("Rename:", appData.images[i].name); if(n){ appData.images[i].name=n.trim(); saveImageToDB(appData.images[i]); renderGallery(); } }
 
-        function downloadData() {
-            if(appData.images.length===0) return alert("No data");
-            const a = document.createElement('a');
-            const file = new Blob([JSON.stringify(appData.images)], {type: 'application/json'});
-            a.href = URL.createObjectURL(file);
-            a.download = `readact_backup_${Date.now()}.json`;
+        /* --- ZIP / .rdct SAVING LOGIC --- */
+        async function saveProject() {
+            if(appData.images.length === 0) return alert("No data to save");
+            
+            const zip = new JSZip();
+            
+            // Prepare clean data for the JSON (without base64 images)
+            const cleanData = appData.images.map(img => ({
+                id: img.id,
+                name: img.name,
+                width: img.width,
+                height: img.height,
+                bars: img.bars,
+                src: img.name // Reference filename
+            }));
+
+            // Add JSON
+            zip.file("data.json", JSON.stringify(cleanData, null, 2));
+            
+            // Add Images Folder
+            const imgFolder = zip.folder("images");
+            
+            appData.images.forEach(img => {
+                // Extract base64 data
+                const base64Data = img.src.split(',')[1];
+                if(base64Data) {
+                    imgFolder.file(img.name, base64Data, {base64: true});
+                }
+            });
+
+            // Generate .rdct file (zip)
+            const content = await zip.generateAsync({type:"blob"});
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(content);
+            a.download = `my_study_project.rdct`; 
             a.click();
         }
-        document.getElementById('fileLoader').addEventListener('change', (e) => {
+
+        /* --- ZIP / .rdct LOADING LOGIC --- */
+        document.getElementById('fileLoader').addEventListener('change', async (e) => {
             const f = e.target.files[0];
             if(!f) return;
-            const r = new FileReader();
-            r.onload = (evt) => {
-                try {
-                    const d = JSON.parse(evt.target.result);
-                    if(Array.isArray(d)) {
-                        appData.images = d;
-                        clearDB().then(() => {
-                            let p = [];
-                            d.forEach(x => p.push(saveImageToDB(x)));
-                            Promise.all(p)
-                                .then(()=>location.reload())
-                                .catch(e => alert("Error saving files: " + e));
-                        });
+
+            // Simple check if it's likely a zip/rdct or old json
+            if(f.name.endsWith('.json')) {
+                // FALLBACK: Load old JSONs
+                const r = new FileReader();
+                r.onload = (evt) => {
+                    try {
+                        const d = JSON.parse(evt.target.result);
+                        if(Array.isArray(d)) {
+                            appData.images = d;
+                            clearDB().then(() => {
+                                let p = []; d.forEach(x => p.push(saveImageToDB(x)));
+                                Promise.all(p).then(()=>location.reload());
+                            });
+                        }
+                    } catch(err) { alert("Invalid JSON"); }
+                };
+                r.readAsText(f);
+                return;
+            }
+
+            // ZIP / RDCT Loading
+            try {
+                const zip = await JSZip.loadAsync(f);
+                const jsonText = await zip.file("data.json").async("string");
+                const parsedData = JSON.parse(jsonText);
+                
+                const newImages = [];
+                const newImgObjects = [];
+
+                // We need to reload the images into base64 for the browser
+                for (const item of parsedData) {
+                    const imgFile = zip.folder("images").file(item.src);
+                    if (imgFile) {
+                        const base64 = await imgFile.async("base64");
+                        // We assume PNG for simplicity, browsers are usually forgiving if the mime is slightly off for img.src
+                        // or we could detect extension. 
+                        let mime = "image/png";
+                        if(item.src.toLowerCase().endsWith('.jpg') || item.src.toLowerCase().endsWith('.jpeg')) mime = "image/jpeg";
+                        
+                        const fullSrc = `data:${mime};base64,${base64}`;
+                        item.src = fullSrc;
+                        newImages.push(item);
                     }
-                } catch(err) { alert("Invalid JSON"); }
-            };
-            r.readAsText(f);
+                }
+
+                if(newImages.length > 0) {
+                    if(confirm("This will overwrite your current project. Continue?")) {
+                        await clearDB();
+                        const p = newImages.map(img => saveImageToDB(img));
+                        await Promise.all(p);
+                        location.reload();
+                    }
+                } else {
+                    alert("No images found in project file.");
+                }
+
+            } catch(err) {
+                console.error(err);
+                alert("Failed to load .rdct file. Is it corrupted?");
+            }
         });
+
         document.getElementById('imgLoader').addEventListener('change', (e) => {
             if(!e.target.files.length) return;
             let loaded = 0;
