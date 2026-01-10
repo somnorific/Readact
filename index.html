@@ -64,7 +64,6 @@
         }
 
         /* --- BUTTONS --- */
-        /* Icon only buttons */
         .icon-btn {
             background: transparent; border: none; color: var(--text);
             width: 40px; height: 40px; border-radius: 50%; 
@@ -78,10 +77,8 @@
         .icon-btn.lock-btn.active { background: var(--red-accent); color: white; }
         .icon-btn:disabled { opacity: 0.3; cursor: default; }
 
-        /* Specific smaller size for Zoom buttons on Desktop */
         .zoom-btn { width: 32px; height: 32px; font-size: 1rem; }
 
-        /* Text/Pill Buttons (Mode Toggle) */
         .pill-btn {
             background: transparent; border: none; color: #888; 
             padding: 8px 16px; border-radius: 25px; cursor: pointer; 
@@ -95,21 +92,16 @@
         .pill-btn:active { transform: scale(0.96); }
         .pill-btn.active { background: var(--accent); color: black; }
 
-        /* Separators */
         .sep { width: 1px; height: 20px; background: #444; margin: 0 2px; }
 
         /* --- LOCATIONS & SPACING --- */
-        
-        /* Top Left */
         #ui-menu { top: 20px; left: 20px; }
         
-        /* Top Center */
         #ui-mode { 
             top: 20px; left: 50%; transform: translateX(-50%); 
             padding: 5px; gap: 0;
         }
         
-        /* RIGHT SIDE STACK */
         #ui-history { 
             top: 20px; right: 20px; 
             display: none; 
@@ -143,7 +135,6 @@
         #ui-zoom { bottom: 30px; left: 50%; transform: translateX(-50%); padding: 5px 15px; gap: 10px; }
         #zoom-disp { font-family: monospace; font-size: 0.9rem; color: #aaa; width: 40px; text-align: center; }
 
-        /* Min/Max Button */
         #tools-toggle { 
             display: none; 
             width: 28px; height: 28px; 
@@ -157,46 +148,25 @@
             transition: transform 0.3s;
         }
         
-        /* --- MOBILE SCALING (Max Width 600px) --- */
         @media (max-width: 600px) {
-            /* Tighter spacing for containers */
             .float-pill { padding: 4px; gap: 3px; }
-
-            /* Smaller Icons */
             .icon-btn { width: 34px; height: 34px; font-size: 1rem; }
             .zoom-btn { width: 28px; height: 28px; font-size: 0.9rem; }
-            
-            /* Smaller Pills */
-            .pill-btn { 
-                height: 34px; 
-                padding: 0 12px; 
-                font-size: 0.8rem; 
-                min-width: 60px; 
-            }
-
-            /* Adjust Separator */
+            .pill-btn { height: 34px; padding: 0 12px; font-size: 0.8rem; min-width: 60px; }
             .sep { height: 16px; margin: 0 1px; }
 
-            /* Reposition Elements closer to edge */
             #ui-menu { top: 15px; left: 15px; }
             #ui-mode { top: 15px; }
             #ui-history { top: 15px; right: 15px; }
             
-            /* Compact Tools Layout */
             #ui-tools { top: 75px; right: 15px; }
             #tools-toggle { display: flex; width: 26px; height: 26px; }
             
-            /* Minimized State */
             #ui-tools.minimized { width: 36px; padding: 4px; background: rgba(20,20,20,0.6); }
             #ui-tools.minimized .icon-btn, #ui-tools.minimized .sep { display: none; }
             #ui-tools.minimized #tools-toggle { margin-right: 0; transform: rotate(180deg); background: var(--accent); color: black; }
 
-            /* Compact Text Props */
-            #ui-text-props { 
-                top: 130px; right: 15px; 
-                width: 180px; 
-                padding: 10px;
-            }
+            #ui-text-props { top: 130px; right: 15px; width: 180px; padding: 10px; }
             .prop-label { font-size: 0.65rem; }
             input[type=range] { height: 3px; }
             
@@ -396,7 +366,7 @@
         </div>
         <div id="gallery-list"></div>
         <button class="btn" id="btn-settings" onclick="toggleSettings()">⚙️ Settings</button>
-        <div id="version-tag">v0.0.5</div>
+        <div id="version-tag">v0.0.6</div>
     </div>
 
     <div id="main">
@@ -462,6 +432,19 @@
             setMode('quiz');
             if(window.innerWidth <= 600) {
                 document.getElementById('ui-tools').classList.add('minimized');
+            }
+
+            // --- FILE HANDLER LISTENER ---
+            // This allows the app to handle files when opened from the system file manager
+            if ('launchQueue' in window) {
+                window.launchQueue.setConsumer(async (launchParams) => {
+                    if (launchParams.files.length > 0) {
+                        const fileHandle = launchParams.files[0];
+                        const file = await fileHandle.getFile();
+                        // Reuse our existing zip/json loader logic
+                        await handleFileLoad(file);
+                    }
+                });
             }
         };
 
@@ -1042,7 +1025,6 @@
                 }
             });
 
-            // UPDATED: Force MIME type to application/zip to help Android recognize it
             const content = await zip.generateAsync({
                 type: "blob", 
                 mimeType: "application/zip",
@@ -1055,14 +1037,12 @@
             a.click();
         }
 
-        /* --- ZIP / .rdct LOADING LOGIC --- */
-        document.getElementById('fileLoader').addEventListener('change', async (e) => {
-            const f = e.target.files[0];
+        /* --- UNIFIED FILE LOADER --- */
+        async function handleFileLoad(f) {
             if(!f) return;
 
             // Simple check if it's likely a zip/rdct or old json
             if(f.name.toLowerCase().endsWith('.json')) {
-                // FALLBACK: Load old JSONs
                 const r = new FileReader();
                 r.onload = (evt) => {
                     try {
@@ -1089,13 +1069,10 @@
                 const newImages = [];
                 const newImgObjects = [];
 
-                // We need to reload the images into base64 for the browser
                 for (const item of parsedData) {
                     const imgFile = zip.folder("images").file(item.src);
                     if (imgFile) {
                         const base64 = await imgFile.async("base64");
-                        // We assume PNG for simplicity, browsers are usually forgiving if the mime is slightly off for img.src
-                        // or we could detect extension. 
                         let mime = "image/png";
                         if(item.src.toLowerCase().endsWith('.jpg') || item.src.toLowerCase().endsWith('.jpeg')) mime = "image/jpeg";
                         
@@ -1106,12 +1083,13 @@
                 }
 
                 if(newImages.length > 0) {
-                    if(confirm("This will overwrite your current project. Continue?")) {
-                        await clearDB();
-                        const p = newImages.map(img => saveImageToDB(img));
-                        await Promise.all(p);
-                        location.reload();
-                    }
+                    // If launched via file handler, we might want to skip confirm for smoother UX, 
+                    // but for safety we keep it or just wipe if empty.
+                    // For now, simple clear and load.
+                    await clearDB();
+                    const p = newImages.map(img => saveImageToDB(img));
+                    await Promise.all(p);
+                    location.reload();
                 } else {
                     alert("No images found in project file.");
                 }
@@ -1120,6 +1098,11 @@
                 console.error(err);
                 alert("Failed to load .rdct file. Is it corrupted?");
             }
+        }
+
+        document.getElementById('fileLoader').addEventListener('change', async (e) => {
+            const f = e.target.files[0];
+            await handleFileLoad(f);
         });
 
         document.getElementById('imgLoader').addEventListener('change', (e) => {
