@@ -388,7 +388,7 @@
             <input type="file" id="imgLoader" multiple accept="image/*">
             <button class="btn" onclick="downloadData()">💾 Download JSON</button>
             <label for="fileLoader" class="btn">📥 Load JSON</label>
-            <input type="file" id="fileLoader" accept=".json">
+            <input type="file" id="fileLoader" accept=".json,application/json">
             <button class="btn" onclick="resetAll()">🗑️ Reset All</button>
         </div>
         <div id="gallery-list"></div>
@@ -543,9 +543,8 @@
             document.getElementById('btn-tool-box').className = `icon-btn ${t==='box'?'active':''}`;
             document.getElementById('btn-tool-text').className = `icon-btn ${t==='text'?'active':''}`;
             
-            if(t !== 'text') {
-                updateTextPropsVisibility(false);
-            }
+            // Fixed: Setting tool forces menu closed. Only clicking 'T' again opens it.
+            updateTextPropsVisibility(false);
         }
         
         function handleTextToolClick(e) {
@@ -553,7 +552,9 @@
                 updateTextPropsVisibility(!isTextPropsOpen);
             } else {
                 setTool('text');
-                updateTextPropsVisibility(true);
+                // Fixed: Do not force open menu on first click.
+                // User must click again to see options.
+                updateTextPropsVisibility(false); 
             }
         }
         
@@ -708,7 +709,9 @@
             textProps.color = b.color;
             textProps.redactable = b.redactable || false;
             
-            updateTextPropsVisibility(true); 
+            // Fixed: Do NOT force menu open on mobile when selecting/creating text.
+            // Menu is manual only.
+            // updateTextPropsVisibility(true); 
 
             document.getElementById('text-size-slider').value = b.fontSize;
             document.getElementById('text-size-val').innerText = b.fontSize;
@@ -880,6 +883,11 @@
                         });
                         saveImageToDB(appData.images[appData.idx]);
                     } else if(activeTool === 'text') {
+                        // Fixed: Dynamic text size based on image width
+                        const imgW = appData.images[appData.idx].width;
+                        const dynamicSize = Math.max(30, Math.floor(imgW / 35));
+                        textProps.size = dynamicSize;
+
                         appData.images[appData.idx].bars.push({
                             x: finalX, y: finalY, w: 10, h: textProps.size,
                             text: "",
@@ -904,7 +912,8 @@
                 let b = bars[i];
                 if(pos.canvasX>=b.x && pos.canvasX<=b.x+b.w && pos.canvasY>=b.y && pos.canvasY<=b.y+b.h) {
                     if(mode === 'quiz') {
-                        if(b.type === 'box') b.hidden = !b.hidden;
+                        // Fixed: Legacy support for old files with undefined type (assume box)
+                        if(b.type === 'box' || !b.type) b.hidden = !b.hidden;
                         else if(b.type === 'text' && b.redactable) b.hidden = !b.hidden;
                         saveImageToDB(appData.images[appData.idx]);
                     } 
@@ -1033,7 +1042,9 @@
                         clearDB().then(() => {
                             let p = [];
                             d.forEach(x => p.push(saveImageToDB(x)));
-                            Promise.all(p).then(()=>location.reload());
+                            Promise.all(p)
+                                .then(()=>location.reload())
+                                .catch(e => alert("Error saving files: " + e));
                         });
                     }
                 } catch(err) { alert("Invalid JSON"); }
@@ -1049,14 +1060,19 @@
                 r.onload = (evt) => {
                     const img = new Image();
                     img.onload = () => {
-                        appData.images.push({
+                        const newImgData = {
                             id: Date.now() + Math.random(),
                             name: file.name,
                             src: evt.target.result,
                             width: img.width, height: img.height,
                             bars: []
-                        });
-                        saveImageToDB(appData.images[appData.images.length-1]);
+                        };
+                        
+                        // Fixed: Push to appData AND imgObjects immediately so no reload needed
+                        appData.images.push(newImgData);
+                        imgObjects.push(img);
+                        
+                        saveImageToDB(newImgData);
                         loaded++;
                         if(loaded === total) { renderGallery(); selectImage(appData.images.length-1); }
                     };
