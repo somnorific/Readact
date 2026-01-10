@@ -391,12 +391,12 @@
             <input type="file" id="imgLoader" multiple accept="image/*">
             <button class="btn" onclick="saveProject()">💾 Save Project (.rdct)</button>
             <label for="fileLoader" class="btn">📥 Load Project (.rdct)</label>
-            <input type="file" id="fileLoader" accept=".rdct,.zip,application/zip">
+            <input type="file" id="fileLoader" accept=".rdct,.zip,.json,application/zip,application/json,*/*">
             <button class="btn" onclick="resetAll()">🗑️ Reset All</button>
         </div>
         <div id="gallery-list"></div>
         <button class="btn" id="btn-settings" onclick="toggleSettings()">⚙️ Settings</button>
-        <div id="version-tag">v0.0.4</div>
+        <div id="version-tag">v0.0.5</div>
     </div>
 
     <div id="main">
@@ -1042,8 +1042,13 @@
                 }
             });
 
-            // Generate .rdct file (zip)
-            const content = await zip.generateAsync({type:"blob"});
+            // UPDATED: Force MIME type to application/zip to help Android recognize it
+            const content = await zip.generateAsync({
+                type: "blob", 
+                mimeType: "application/zip",
+                compression: "DEFLATE"
+            });
+            
             const a = document.createElement("a");
             a.href = URL.createObjectURL(content);
             a.download = `my_study_project.rdct`; 
@@ -1056,7 +1061,7 @@
             if(!f) return;
 
             // Simple check if it's likely a zip/rdct or old json
-            if(f.name.endsWith('.json')) {
+            if(f.name.toLowerCase().endsWith('.json')) {
                 // FALLBACK: Load old JSONs
                 const r = new FileReader();
                 r.onload = (evt) => {
